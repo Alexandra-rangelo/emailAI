@@ -142,3 +142,266 @@
     background-color: #f9f9f9;
     width: 30%;
 }
+
+/* ============================================================
+   IQSEC Report Styles
+   ============================================================ */
+
+.iqsec-report {
+    font-family: Calibri, 'Segoe UI', Arial, sans-serif;
+    font-size: 11pt;
+    color: #1a1a1a;
+    line-height: 1.6;
+}
+
+/* Metadata header block */
+.report-meta-block {
+    border: 2px solid #003366;
+    border-radius: 4px;
+    padding: 16px 20px;
+    margin-bottom: 28px;
+    background: #f0f4fa;
+}
+
+.report-logo-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 12px;
+}
+
+.report-brand {
+    font-size: 22pt;
+    font-weight: 800;
+    color: #003366;
+    letter-spacing: 2px;
+}
+
+.report-doc-type {
+    font-size: 10pt;
+    color: #555;
+    font-style: italic;
+}
+
+.meta-kv-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 10pt;
+}
+
+.meta-kv-table td {
+    padding: 4px 10px;
+    border: 1px solid #c8d4e8;
+    color: #1a1a1a;
+}
+
+.meta-kv-table td:first-child {
+    font-weight: 700;
+    background: #e0eaf8;
+    width: 28%;
+    color: #003366;
+}
+
+/* Sections */
+.iqsec-report .report-section {
+    margin-bottom: 28px;
+}
+
+.iqsec-report .section-title {
+    font-size: 13pt;
+    font-weight: 700;
+    color: #003366;
+    border-bottom: 2px solid #003366;
+    padding-bottom: 5px;
+    margin-bottom: 14px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.sec-num {
+    background: #003366;
+    color: #fff;
+    border-radius: 3px;
+    padding: 1px 8px;
+    font-size: 11pt;
+    line-height: 1.4;
+}
+
+/* Subsections */
+.report-subsection {
+    margin-bottom: 20px;
+    padding-left: 10px;
+    border-left: 3px solid #4a90d9;
+}
+
+.subsection-title {
+    font-size: 11pt;
+    font-weight: 700;
+    color: #1a3a6b;
+    margin: 0 0 10px;
+}
+
+/* Editable text fields */
+.editable-field {
+    min-height: 64px;
+    padding: 8px 12px;
+    border: 1px dashed #aac4d8;
+    border-radius: 4px;
+    background: #fafcff;
+    white-space: pre-wrap;
+    font-size: 10.5pt;
+    line-height: 1.65;
+    margin-bottom: 12px;
+    color: #1a1a1a;
+}
+
+.editable-field:empty::before {
+    content: attr(placeholder);
+    color: #b0bec5;
+    font-style: italic;
+    pointer-events: none;
+}
+
+.editable-field:hover {
+    border-color: #4a90d9;
+    background: #f0f6ff;
+}
+
+.editable-field:focus {
+    outline: 2px solid #4a90d9 !important;
+    background: #f5f9ff;
+}
+
+.recommendations-field {
+    min-height: 180px;
+}
+
+/* Resumen intro text */
+.resumen-intro p {
+    margin: 0 0 10px;
+    font-size: 10.5pt;
+    color: #1a1a1a;
+}
+
+/* Inline editable spans (EMPRESA, ID) */
+.inline-editable {
+    border-bottom: 2px dashed #4a90d9;
+    color: #003366;
+    font-weight: 700;
+    padding: 1px 3px;
+    cursor: text;
+    border-radius: 2px;
+}
+
+.inline-editable:hover {
+    background: #e8f0fe;
+}
+
+.inline-editable:focus {
+    outline: 2px solid #4a90d9 !important;
+    background: #e8f0fe;
+}
+
+/* Table labels */
+.table-label {
+    font-size: 9.5pt;
+    font-weight: 700;
+    color: #444;
+    font-style: italic;
+    margin: 16px 0 5px;
+}
+
+/* Table wrapper */
+.table-wrapper {
+    overflow-x: auto;
+    margin-bottom: 14px;
+}
+
+/* Report tables */
+.iqsec-report .report-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 9.5pt;
+}
+
+.iqsec-report .report-table th {
+    background: #003366;
+    color: #fff;
+    padding: 7px 10px;
+    text-align: left;
+    font-weight: 600;
+    border: 1px solid #002244;
+}
+
+.iqsec-report .report-table td {
+    padding: 6px 10px;
+    border: 1px solid #c8d4e8;
+    vertical-align: top;
+    color: #1a1a1a;
+}
+
+.iqsec-report .report-table tr:nth-child(even) td {
+    background: #f5f8ff;
+}
+
+.iqsec-report .report-table tr:hover td {
+    background: #ebf2ff;
+}
+
+.field-key {
+    font-weight: 600;
+    color: #1a3a6b;
+    background: #eaf0fb !important;
+    width: 22%;
+    min-width: 120px;
+}
+
+/* IOC table */
+.ioc-report-table th {
+    font-size: 8.5pt;
+}
+
+.ioc-report-table td {
+    font-size: 9pt;
+}
+
+/* Empty rows */
+.empty-row {
+    text-align: center;
+    color: #999;
+    font-style: italic;
+    padding: 12px !important;
+}
+
+/* Add IOC button */
+.add-ioc-btn {
+    margin-top: 10px;
+    font-size: 9.5pt;
+}
+
+/* Print styles */
+@media print {
+    .iqsec-report .report-section {
+        page-break-inside: avoid;
+    }
+    .report-meta-block {
+        page-break-after: avoid;
+    }
+    .add-ioc-btn {
+        display: none !important;
+    }
+    .editable-field {
+        border: none !important;
+        background: transparent !important;
+        padding: 0;
+    }
+    .editable-field:empty::before {
+        display: none;
+    }
+    .inline-editable {
+        border-bottom: none;
+        color: inherit;
+        font-weight: inherit;
+    }
+}

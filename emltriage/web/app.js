@@ -492,110 +492,33 @@ function initializeEventListeners() {
     });
   }
 
-  // Build Draft Button
+  // Generate Report Button
   const btnPreviewDocx = document.getElementById('btn-preview-docx');
-  let currentLayer3RenderModel = null;
-  
   if (btnPreviewDocx) {
-    console.log('[DEBUG] Build Draft button found, attaching handler');
-    btnPreviewDocx.addEventListener('click', async () => {
-      console.log('[DEBUG] Build Draft clicked!');
-      console.log('[DEBUG] state.data:', state.data);
-      console.log('[DEBUG] state.data.artifacts:', state.data?.artifacts);
-      
-      // First, fetch the built report layer 3 JSON
-      showToast('Rendering preview...', 'info');
-      try {
-        if (!state.data || !state.data.artifacts) {
-          throw new Error('No artifacts loaded. Please analyze an email first.');
-        }
-        
-        const response = await fetch('/api/report/preview', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-             artifacts: state.data.artifacts,
-             case_id: '',
-             include_ai: true
-          })
-        });
-        
-        console.log('[DEBUG] Response status:', response.status);
-        
-        if (!response.ok) {
-          const errText = await response.text();
-          console.error('[DEBUG] Response error:', errText);
-          throw new Error('Failed to generate preview: ' + response.status);
-        }
-        
-        const responseData = await response.json();
-        console.log('[DEBUG] Response data keys:', Object.keys(responseData));
-        
-        currentLayer3RenderModel = responseData;
-        
-        // Hide empty state and show container
-        document.getElementById('docx-empty-state').style.display = 'none';
-        const container = document.getElementById('docx-preview-container');
-        container.style.display = 'block';
-        
-        // Render!
-        renderLayer3ToHTML(currentLayer3RenderModel, container);
-        showToast('Preview loaded. You can now edit the text.', 'success');
-        
-      } catch (err) {
-         console.error('[DEBUG] Preview error:', err);
-         showToast(`Preview Error: ${err.message}`, 'error');
+    btnPreviewDocx.addEventListener('click', () => {
+      if (!state.data || !state.data.artifacts) {
+        showToast('No hay datos cargados. Analiza un correo primero.', 'error');
+        return;
       }
+      document.getElementById('docx-empty-state').style.display = 'none';
+      const container = document.getElementById('docx-preview-container');
+      container.style.display = 'block';
+      renderIQSECReport(container);
+      setupImagePaste(container);
+      showToast('Vista previa generada. Puedes editar el texto directamente, y pegar capturas de pantalla con Ctrl+V / Cmd+V.', 'success');
     });
-  } else {
-    console.warn('[DEBUG] Build Draft button NOT FOUND - ID: btn-preview-docx');
   }
 
-  // DOCX Export Modal / Direct Download
+  // Download HTML Report
   const btnGenDocx = document.getElementById('btn-generate-docx-panel');
   if (btnGenDocx) {
-    btnGenDocx.addEventListener('click', async () => {
-      const summary = document.getElementById('docx-ai-summary-panel').value || '';
-      const autoOpen = document.getElementById('docx-auto-open-panel').checked;
-      
-      let layer3_modified = null;
-      if (currentLayer3RenderModel && document.getElementById('docx-preview-container').style.display !== 'none') {
-          layer3_modified = serializeDocxPreview(currentLayer3RenderModel);
+    btnGenDocx.addEventListener('click', () => {
+      const container = document.getElementById('docx-preview-container');
+      if (!container || container.style.display === 'none') {
+        showToast('Primero genera la vista previa del reporte.', 'error');
+        return;
       }
-      
-      showToast('Generating DOCX report...', 'info');
-      try {
-        const response = await fetch('/api/export/docx', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            artifacts: state.data.artifacts,
-            ai_summary: summary,
-            auto_open: autoOpen,
-            layer3_json: layer3_modified
-          })
-        });
-        
-        if (!response.ok) {
-          const err = await response.json();
-          throw new Error(err.detail || 'Failed to generate report');
-        }
-        
-        // Handle file download
-        const blob = await response.blob();
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        const filename = state.data.artifacts?.metadata?.input_filename || 'email';
-        a.download = `Report_${filename.replace(/[^a-z0-9]/gi, '_')}.docx`;
-        a.click();
-        URL.revokeObjectURL(url);
-        
-        showToast('DOCX report generated successfully', 'success');
-      } catch (err) {
-        showToast(`Export error: ${err.message}`, 'error');
-        console.error('Docx export failed:', err);
-      }
+      exportIQSECHTML();
     });
   }
 
@@ -1085,6 +1008,15 @@ function loadData(data) {
   }
 
   showToast('Analysis loaded successfully', 'success');
+
+  // Reset Report Builder so stale data isn't shown when a new email is loaded
+  const reportContainer = document.getElementById('docx-preview-container');
+  const reportEmptyState = document.getElementById('docx-empty-state');
+  if (reportContainer && reportEmptyState) {
+    reportContainer.style.display = 'none';
+    reportContainer.innerHTML = '';
+    reportEmptyState.style.display = '';
+  }
 }
 
 // Panel Rendering
@@ -2147,6 +2079,643 @@ function exportData(type) {
   a.click();
   URL.revokeObjectURL(url);
   showToast(`Exported ${filename}`, 'success');
+}
+
+// ============================================================
+// IQSEC Report Generator
+// ============================================================
+
+function renderIQSECReport(container) {
+  const artifacts = state.data?.artifacts || {};
+  const headers = artifacts.headers || [];
+  const routing = artifacts.routing || [];
+  const cti = state.data?.cti || {};
+  const metadata = artifacts.metadata || {};
+
+  const getHeader = (name) => {
+    const h = headers.find(h => h.name.toLowerCase() === name.toLowerCase());
+    return h ? (h.decoded_value || h.raw_value || '') : '';
+  };
+
+  const caseId = metadata.run_id || metadata.input_filename || '';
+  const analysisDate = metadata.timestamp
+    ? new Date(metadata.timestamp).toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric' })
+    : new Date().toLocaleDateString('es-MX', { day: '2-digit', month: '2-digit', year: 'numeric' });
+
+  // Tabla 1 — Datos generales
+  const tabla1 = [
+    ['De (From)', getHeader('From')],
+    ['Para (To)', getHeader('To')],
+    ['Asunto (Subject)', getHeader('Subject')],
+    ['Fecha', getHeader('Date')],
+    ['Message-ID', getHeader('Message-ID')],
+    ['Reply-To', getHeader('Reply-To')],
+    ['Return-Path', getHeader('Return-Path')],
+    ['X-Originating-IP', getHeader('X-Originating-IP')],
+  ].filter(([, v]) => v);
+
+  // Tabla 2 — Trayectoria
+  const tabla2Rows = routing.map((hop, i) => {
+    const from = hop.from_host || '?';
+    const by = hop.by_host || '?';
+    const desc = i === 0
+      ? `El servidor de origen ${from} envió el correo al servidor ${by}.`
+      : `El servidor ${from} retransmitió el mensaje al servidor ${by}.`;
+    return [
+      `Salto ${i + 1}`,
+      from,
+      by,
+      desc,
+    ];
+  });
+
+  // IOC List
+  const rawIocs = state.data?.iocs || artifacts.iocs || [];
+  let iocList = Array.isArray(rawIocs)
+    ? rawIocs
+    : [...(rawIocs.domains || []), ...(rawIocs.ips || []), ...(rawIocs.urls || []), ...(rawIocs.hashes || [])];
+  iocList = iocList.filter(i => i && i.value && !isInfrastructureNoise(i));
+
+  const enrichments = cti?.enrichments || [];
+  const whoisData = cti?.whois || {};
+  const dnsData = cti?.dns_records || {};
+
+  // Risk summary for metadata block
+  const riskScore = artifacts.risk?.score ?? '—';
+  const riskSeverity = artifacts.risk?.severity ?? '—';
+
+  container.innerHTML = `
+<div class="iqsec-report">
+
+  <!-- METADATA -->
+  <div class="report-meta-block">
+    <div class="report-logo-row">
+      <span class="report-brand">IQSEC</span>
+      <span class="report-doc-type">Reporte de Análisis Forense de Correo Electrónico</span>
+    </div>
+    <table class="meta-kv-table">
+      <tr><td>TLP</td><td contenteditable="true" data-placeholder="Ej. TLP:WHITE"></td></tr>
+      <tr><td>Línea de servicio</td><td contenteditable="true" data-placeholder=""></td></tr>
+      <tr><td>Categoría</td><td contenteditable="true" data-placeholder=""></td></tr>
+      <tr><td>Serial</td><td contenteditable="true" data-placeholder=""></td></tr>
+      <tr><td>Fecha</td><td contenteditable="true" data-placeholder="">${analysisDate}</td></tr>
+      <tr><td>Ticket interno</td><td contenteditable="true" data-placeholder=""></td></tr>
+    </table>
+  </div>
+
+  <!-- 1. POSIBLE IMPACTO -->
+  <div class="report-section">
+    <h2 class="section-title"><span class="sec-num">1.</span> Posible Impacto</h2>
+    <div class="editable-field" contenteditable="true" data-field="posible_impacto"
+         placeholder="Describa el riesgo o impacto potencial del incidente..."></div>
+  </div>
+
+  <!-- 2. RESUMEN -->
+  <div class="report-section">
+    <h2 class="section-title"><span class="sec-num">2.</span> Resumen</h2>
+    <div class="editable-field" contenteditable="true" data-field="resumen_intro">En cumplimiento del contrato Mabe, relativo a la: \u2018CONTRATACI\u00d3N PLURIANUAL DEL SERVICIO ADMINISTRADO DE SEGURIDAD INFORM\u00c1TICA\u2019, celebrado entre el &lt;EMPRESA&gt; e IQSEC, se atiende la solicitud de an\u00e1lisis de un correo electr\u00f3nico con el ID de seguimiento ${escapeHtml(caseId)}.
+
+A continuaci\u00f3n, se comparten detalles adicionales referentes a la investigaci\u00f3n realizada. El equipo de Ciberinteligencia de IQSEC observ\u00f3 los siguientes puntos:</div>
+    <div class="editable-field" contenteditable="true" data-field="resumen_continuacion"
+         placeholder="Contin\u00fae describiendo los puntos observados por el equipo..."></div>
+  </div>
+
+  <!-- 3. ANÁLISIS DE CORREOS -->
+  <div class="report-section">
+    <h2 class="section-title"><span class="sec-num">3.</span> Análisis de correos</h2>
+
+    <!-- 3.1 Cabeceras -->
+    <div class="report-subsection">
+      <h3 class="subsection-title">3.1 Análisis de cabeceras (headers)</h3>
+      <div class="editable-field" contenteditable="true" data-field="cabeceras_desc"
+           placeholder="Describa los hallazgos relevantes en las cabeceras del correo..."></div>
+
+      <p class="table-label">Tabla 1. Datos generales del correo electrónico</p>
+      <div class="table-wrapper">
+        <table class="report-table">
+          <thead><tr><th>Campo</th><th>Valor</th></tr></thead>
+          <tbody>
+            ${tabla1.length > 0
+              ? tabla1.map(([k, v]) => `<tr><td class="field-key">${escapeHtml(k)}</td><td contenteditable="true">${escapeHtml(v)}</td></tr>`).join('')
+              : '<tr><td colspan="2" class="empty-row">Sin datos de cabeceras disponibles</td></tr>'
+            }
+          </tbody>
+        </table>
+      </div>
+
+      <p class="table-label">Tabla 2. Trayectoria del correo (Routing)</p>
+      <div class="table-wrapper">
+        <table class="report-table">
+          <thead>
+            <tr><th>Salto</th><th>Origen (From)</th><th>Servidor (By)</th><th>Descripción</th></tr>
+          </thead>
+          <tbody>
+            ${tabla2Rows.length > 0
+              ? tabla2Rows.map(row => `<tr>${row.map(cell => `<td contenteditable="true">${escapeHtml(cell)}</td>`).join('')}</tr>`).join('')
+              : '<tr><td colspan="4" class="empty-row">Sin datos de enrutamiento disponibles</td></tr>'
+            }
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- 3.2 Dominio -->
+    <div class="report-subsection">
+      <h3 class="subsection-title">3.2 Información sobre el dominio</h3>
+      <div class="editable-field" contenteditable="true" data-field="dominio_desc"
+           placeholder="Describa el registro del dominio, registrador, fechas de creación y expiración, privacidad y ubicación...">${buildDomainNarrative(whoisData, dnsData)}</div>
+    </div>
+
+    <!-- 3.3 Artefactos -->
+    <div class="report-subsection">
+      <h3 class="subsection-title">3.3 Análisis de artefactos</h3>
+      <div class="editable-field" contenteditable="true" data-field="artefactos_desc"
+           placeholder="Analice las URLs, redirecciones y elementos sospechosos presentes en el correo...">${buildArtefactosNarrative(artifacts)}</div>
+    </div>
+
+    <!-- 3.4 Reputación -->
+    <div class="report-subsection">
+      <h3 class="subsection-title">3.4 Reputación de dominios</h3>
+      <div class="editable-field" contenteditable="true" data-field="reputacion_desc"
+           placeholder="Documente los resultados de VirusTotal u otras fuentes de inteligencia de amenazas...">${buildReputacionNarrative(enrichments)}</div>
+    </div>
+  </div>
+
+  <!-- 4. CONCLUSIONES -->
+  <div class="report-section">
+    <h2 class="section-title"><span class="sec-num">4.</span> Conclusiones</h2>
+    <div class="editable-field" contenteditable="true" data-field="conclusiones"
+         placeholder="Escriba el análisis final del incidente..."></div>
+  </div>
+
+  <!-- 5. RECOMENDACIONES -->
+  <div class="report-section">
+    <h2 class="section-title"><span class="sec-num">5.</span> Recomendaciones</h2>
+    <div class="editable-field recommendations-field" contenteditable="true" data-field="recomendaciones">Se recomienda implementar las siguientes medidas de seguridad:
+
+Controles de autenticación de correo:
+• Verificar y fortalecer la política SPF del dominio remitente.
+• Implementar y validar firmas DKIM para todos los correos salientes.
+• Configurar DMARC con política de rechazo (p=reject) para prevenir suplantación de identidad.
+
+Medidas de seguridad de correo:
+• Bloquear o poner en cuarentena correos provenientes del dominio/IP identificado.
+• Revisar y actualizar las reglas de filtrado en el gateway de correo corporativo.
+
+Concientización de usuarios:
+• Notificar al usuario receptor sobre el intento de phishing o fraude detectado.
+• Reforzar la capacitación en identificación de correos electrónicos maliciosos.
+
+Mecanismos de reporte de incidentes:
+• Reportar los IoCs identificados al equipo de SOC para actualización de listas de bloqueo.
+• Documentar el incidente en la plataforma de gestión de tickets correspondiente.</div>
+  </div>
+
+  <!-- 6. INDICADORES DE COMPROMISO (IoCs) -->
+  <div class="report-section">
+    <h2 class="section-title"><span class="sec-num">6.</span> Indicadores de Compromiso (IoCs)</h2>
+    <div class="table-wrapper">
+      <table class="report-table ioc-report-table">
+        <thead>
+          <tr>
+            <th>Tipo</th>
+            <th>Valor</th>
+            <th>Fecha de Detección</th>
+            <th>Score</th>
+            <th>Fuente</th>
+            <th>Recomendación</th>
+            <th>Comentario</th>
+          </tr>
+        </thead>
+        <tbody id="ioc-report-tbody">
+          ${buildIoCRows(iocList, enrichments, metadata)}
+        </tbody>
+      </table>
+    </div>
+    <button class="btn secondary add-ioc-btn" onclick="addIoCRow()">+ Agregar indicador</button>
+  </div>
+
+  <!-- 7. EVIDENCIAS Y CAPTURAS DE PANTALLA -->
+  <div class="report-section">
+    <h2 class="section-title"><span class="sec-num">7.</span> Evidencias y Capturas de Pantalla</h2>
+    <div class="evidencias-img-zone"
+         style="min-height:130px;border:2px dashed #4a90d9;border-radius:8px;padding:20px;background:#f5f9ff;position:relative;">
+      <p class="evidencias-hint"
+         style="text-align:center;color:#aab;font-style:italic;margin:0;pointer-events:none;padding-top:24px;">
+        Pega capturas de pantalla con <strong>Ctrl+V</strong> / <strong>Cmd+V</strong>,
+        o arrastra imágenes desde tu equipo
+      </p>
+    </div>
+  </div>
+
+</div>`;
+}
+
+function buildDomainNarrative(whoisData, dnsData) {
+  const domains = Object.keys(whoisData);
+  if (domains.length === 0) return '';
+  return domains.map(domain => {
+    const w = whoisData[domain];
+    const dns = dnsData[domain] || 'No resuelto';
+    if (!w || w.error) return '';
+    return `El dominio ${domain} fue registrado el ${w.creation || 'fecha desconocida'} a través del registrador ${w.registrar || 'desconocido'}. Resolución DNS: ${dns}. Evaluación: ${w.assessment || 'Desconocida'}.`;
+  }).filter(Boolean).join('\n\n');
+}
+
+function buildArtefactosNarrative(artifacts) {
+  const urls = artifacts.urls || [];
+  const attachments = artifacts.attachments || [];
+  if (urls.length === 0 && attachments.length === 0) return '';
+  let text = '';
+  if (urls.length > 0) {
+    text += `Se identificaron ${urls.length} URL(s) en el cuerpo del correo.`;
+    const obfuscated = urls.filter(u => u.is_obfuscated);
+    if (obfuscated.length > 0) {
+      text += ` ${obfuscated.length} URL(s) presentan técnicas de ofuscación (${[...new Set(obfuscated.map(u => u.obfuscation_type).filter(Boolean))].join(', ')}).`;
+    }
+  }
+  if (attachments.length > 0) {
+    const risky = attachments.filter(a => a.is_risky);
+    if (text) text += '\n\n';
+    text += `Se encontraron ${attachments.length} adjunto(s)`;
+    if (risky.length > 0) {
+      text += `, de los cuales ${risky.length} presentan indicadores de riesgo: ${risky.map(a => a.filename_decoded || a.filename_raw).join(', ')}`;
+    }
+    text += '.';
+  }
+  return text;
+}
+
+function buildReputacionNarrative(enrichments) {
+  if (!enrichments || enrichments.length === 0) return '';
+  const malicious = enrichments.filter(e => e.malicious_score > 0);
+  if (malicious.length === 0) {
+    return `Se consultaron ${enrichments.length} indicador(es) en fuentes de inteligencia de amenazas. No se encontraron detecciones maliciosas.`;
+  }
+  return malicious.map(e =>
+    `${e.ioc} — Score: ${e.malicious_score}/100 (${e.provider}). Etiquetas: ${(e.tags || []).join(', ') || 'N/A'}.`
+  ).join('\n');
+}
+
+function buildIoCRows(iocList, enrichments, metadata) {
+  if (!iocList || iocList.length === 0) {
+    return '<tr><td colspan="7" class="empty-row">Sin indicadores identificados</td></tr>';
+  }
+  const detectionDate = metadata.timestamp
+    ? new Date(metadata.timestamp).toLocaleDateString('es-MX')
+    : new Date().toLocaleDateString('es-MX');
+  return iocList.slice(0, 30).map(ioc => {
+    const enrich = enrichments.find(e => e.ioc === ioc.value);
+    const score = enrich ? enrich.malicious_score : '—';
+    const fuente = enrich ? enrich.provider : (ioc.source || '—');
+    return `<tr>
+      <td contenteditable="true">${escapeHtml(ioc.type || '—')}</td>
+      <td contenteditable="true" style="font-family:monospace;font-size:9pt;word-break:break-all;">${escapeHtml(ioc.value || '—')}</td>
+      <td contenteditable="true">${escapeHtml(detectionDate)}</td>
+      <td contenteditable="true">${escapeHtml(String(score))}</td>
+      <td contenteditable="true">${escapeHtml(fuente)}</td>
+      <td contenteditable="true">Bloquear</td>
+      <td contenteditable="true"></td>
+    </tr>`;
+  }).join('');
+}
+
+function addIoCRow() {
+  const tbody = document.getElementById('ioc-report-tbody');
+  if (!tbody) return;
+  const tr = document.createElement('tr');
+  tr.innerHTML = `
+    <td contenteditable="true"></td>
+    <td contenteditable="true" style="font-family:monospace;font-size:9pt;"></td>
+    <td contenteditable="true">${new Date().toLocaleDateString('es-MX')}</td>
+    <td contenteditable="true">—</td>
+    <td contenteditable="true"></td>
+    <td contenteditable="true">Bloquear</td>
+    <td contenteditable="true"></td>
+  `;
+  tbody.appendChild(tr);
+  tr.querySelector('td').focus();
+  tr.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+function setupImagePaste(container) {
+  function updateHint() {
+    const zone = container.querySelector('.evidencias-img-zone');
+    if (!zone) return;
+    const hint = zone.querySelector('.evidencias-hint');
+    if (hint) hint.style.display = zone.querySelector('img') ? 'none' : 'block';
+  }
+
+  function insertImage(src) {
+    const wrapper = document.createElement('div');
+    wrapper.className = 'report-img-wrapper';
+    wrapper.style.cssText = 'display:block;margin:12px 0;max-width:100%;position:relative;';
+
+    const img = document.createElement('img');
+    img.src = src;
+    img.setAttribute('data-report-img', '1');
+    img.style.cssText = 'max-width:100%;height:auto;border:1px solid #c8d4e8;border-radius:4px;display:block;cursor:default;';
+
+    const delBtn = document.createElement('button');
+    delBtn.className = 'img-delete-btn';
+    delBtn.textContent = '✕';
+    delBtn.title = 'Eliminar imagen';
+    delBtn.style.cssText = 'position:absolute;top:6px;right:6px;background:#c0392b;color:#fff;border:none;border-radius:3px;padding:2px 7px;cursor:pointer;font-size:12px;font-weight:bold;z-index:10;opacity:0.85;';
+    delBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      wrapper.remove();
+      updateHint();
+    });
+
+    wrapper.appendChild(img);
+    wrapper.appendChild(delBtn);
+
+    // Try to insert at cursor if focused inside an editable field
+    const sel = window.getSelection();
+    let inserted = false;
+    if (sel && sel.rangeCount > 0) {
+      const anchor = sel.getRangeAt(0).startContainer;
+      const field = (anchor.nodeType === 3 ? anchor.parentElement : anchor).closest('[contenteditable="true"]');
+      if (field && container.contains(field)) {
+        const range = sel.getRangeAt(0);
+        range.deleteContents();
+        range.insertNode(wrapper);
+        const newRange = document.createRange();
+        newRange.setStartAfter(wrapper);
+        newRange.collapse(true);
+        sel.removeAllRanges();
+        sel.addRange(newRange);
+        inserted = true;
+      }
+    }
+
+    if (!inserted) {
+      const zone = container.querySelector('.evidencias-img-zone');
+      if (zone) zone.appendChild(wrapper);
+    }
+    updateHint();
+  }
+
+  // Paste (Ctrl+V / Cmd+V)
+  container.addEventListener('paste', (e) => {
+    const items = Array.from((e.clipboardData || window.clipboardData).items || []);
+    const imageItem = items.find(item => item.type.startsWith('image/'));
+    if (!imageItem) return;
+    e.preventDefault();
+    const file = imageItem.getAsFile();
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => insertImage(ev.target.result);
+    reader.readAsDataURL(file);
+  });
+
+  // Drag-and-drop onto evidencias zone
+  const zone = container.querySelector('.evidencias-img-zone');
+  if (zone) {
+    zone.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      zone.style.borderColor = '#003366';
+      zone.style.background = '#e8f0ff';
+    });
+    zone.addEventListener('dragleave', () => {
+      zone.style.borderColor = '#4a90d9';
+      zone.style.background = '#f5f9ff';
+    });
+    zone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      zone.style.borderColor = '#4a90d9';
+      zone.style.background = '#f5f9ff';
+      Array.from(e.dataTransfer.files || [])
+        .filter(f => f.type.startsWith('image/'))
+        .forEach(file => {
+          const reader = new FileReader();
+          reader.onload = (ev) => insertImage(ev.target.result);
+          reader.readAsDataURL(file);
+        });
+    });
+  }
+}
+
+function exportIQSECHTML() {
+  const preview = document.getElementById('docx-preview-container');
+  if (!preview) return;
+  const filename = state.data?.artifacts?.metadata?.input_filename || 'reporte';
+  const safeName = filename.replace(/[^a-z0-9]/gi, '_');
+
+  const html = `<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Reporte IQSEC — ${escapeHtml(filename)}</title>
+<style>
+/* IQSEC Report Styles — self-contained */
+*, *::before, *::after { box-sizing: border-box; }
+body { margin: 0; padding: 30px; font-family: Calibri, 'Segoe UI', Arial, sans-serif; background: #fff; color: #1a1a1a; font-size: 11pt; line-height: 1.6; }
+.iqsec-report { max-width: 860px; margin: 0 auto; }
+[contenteditable] { outline: none !important; }
+.add-ioc-btn { display: none !important; }
+.report-meta-block { border: 2px solid #003366; border-radius: 4px; padding: 16px 20px; margin-bottom: 28px; background: #f0f4fa; }
+.report-logo-row { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 12px; }
+.report-brand { font-size: 22pt; font-weight: 800; color: #003366; letter-spacing: 2px; }
+.report-doc-type { font-size: 10pt; color: #555; font-style: italic; }
+.meta-kv-table { width: 100%; border-collapse: collapse; font-size: 10pt; }
+.meta-kv-table td { padding: 4px 10px; border: 1px solid #c8d4e8; }
+.meta-kv-table td:first-child { font-weight: 700; background: #e0eaf8; width: 30%; color: #003366; }
+.report-section { margin-bottom: 28px; }
+.section-title { font-size: 13pt; font-weight: 700; color: #003366; border-bottom: 2px solid #003366; padding-bottom: 4px; margin-bottom: 14px; display: flex; align-items: center; gap: 6px; }
+.sec-num { background: #003366; color: #fff; border-radius: 3px; padding: 1px 7px; font-size: 11pt; }
+.report-subsection { margin-bottom: 20px; padding-left: 8px; border-left: 3px solid #4a90d9; }
+.subsection-title { font-size: 11pt; font-weight: 700; color: #1a3a6b; margin-bottom: 8px; }
+.editable-field { min-height: 60px; padding: 8px 10px; border: 1px dashed #aac; border-radius: 4px; background: #fafcff; white-space: pre-wrap; font-size: 10.5pt; line-height: 1.65; }
+.editable-field:empty::before { content: attr(placeholder); color: #aab; font-style: italic; pointer-events: none; }
+.editable-field:hover { border-color: #4a90d9; background: #f0f6ff; }
+.editable-field:focus { outline: 2px solid #4a90d9; background: #f5f9ff; }
+.resumen-intro p { margin: 0 0 10px; font-size: 10.5pt; }
+.inline-editable { border-bottom: 1px dashed #4a90d9; color: #003366; font-weight: 700; padding: 0 2px; cursor: text; }
+.inline-editable:hover { background: #e8f0fe; }
+.table-label { font-size: 9.5pt; font-weight: 700; color: #555; font-style: italic; margin: 14px 0 4px; }
+.table-wrapper { overflow-x: auto; margin-bottom: 14px; }
+.report-table { width: 100%; border-collapse: collapse; font-size: 9.5pt; }
+.report-table th { background: #003366; color: #fff; padding: 7px 10px; text-align: left; font-weight: 600; border: 1px solid #002244; }
+.report-table td { padding: 6px 10px; border: 1px solid #c8d4e8; vertical-align: top; }
+.report-table tr:nth-child(even) td { background: #f5f8ff; }
+.report-table tr:hover td { background: #ebf2ff; }
+.field-key { font-weight: 600; color: #1a3a6b; background: #eaf0fb !important; width: 25%; }
+.ioc-report-table th { font-size: 8.5pt; }
+.ioc-report-table td { font-size: 9pt; }
+.empty-row { text-align: center; color: #999; font-style: italic; }
+.recommendations-field { white-space: pre-wrap; }
+@media print {
+  body { padding: 0; font-size: 10pt; }
+  .report-section { page-break-inside: avoid; }
+  .report-meta-block { page-break-after: avoid; }
+  @page { margin: 2cm 2.5cm; }
+}
+</style>
+</head>
+<body>
+${preview.innerHTML}
+</body>
+</html>`;
+
+  const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `Reporte_IQSEC_${safeName}.html`;
+  a.style.display = 'none';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+  showToast('Reporte HTML descargado', 'success');
+}
+
+function downloadIQSECWord() {
+  const container = document.getElementById('docx-preview-container');
+  if (!container || container.style.display === 'none') {
+    showToast('Primero genera la vista previa del reporte.', 'error');
+    return;
+  }
+
+  // Clone DOM so we can transform it without affecting the preview
+  const clone = container.cloneNode(true);
+
+  // Remove buttons not needed in Word
+  clone.querySelectorAll('.add-ioc-btn').forEach(el => el.remove());
+  clone.querySelectorAll('.img-delete-btn').forEach(el => el.remove());
+
+  // Remove drop-zone hint text (no longer needed in Word)
+  clone.querySelectorAll('.evidencias-hint').forEach(el => el.remove());
+
+  // Remove dashed border/background from evidencias zone for Word
+  clone.querySelectorAll('.evidencias-img-zone').forEach(el => {
+    el.style.border = 'none';
+    el.style.background = 'transparent';
+    el.style.padding = '0';
+    el.style.minHeight = 'auto';
+  });
+
+  // Ensure embedded images render correctly in Word
+  clone.querySelectorAll('[data-report-img]').forEach(img => {
+    img.style.cssText = 'max-width:100%;height:auto;display:block;margin:8pt 0;border:1pt solid #c8d4e8;';
+  });
+  clone.querySelectorAll('.report-img-wrapper').forEach(el => {
+    el.style.cssText = 'display:block;margin:10pt 0;max-width:100%;';
+  });
+
+  // Fix flexbox logo row → Word-compatible table layout
+  const logoRow = clone.querySelector('.report-logo-row');
+  if (logoRow) {
+    const brand = logoRow.querySelector('.report-brand');
+    const docType = logoRow.querySelector('.report-doc-type');
+    const tbl = document.createElement('table');
+    tbl.setAttribute('width', '100%');
+    tbl.style.cssText = 'width:100%;border:none;border-collapse:collapse;';
+    tbl.innerHTML = `<tr>
+      <td style="border:none;padding:0;font-family:Calibri,Arial,sans-serif;font-size:22pt;font-weight:800;color:#003366;letter-spacing:2px;">${brand ? brand.innerHTML : 'IQSEC'}</td>
+      <td style="border:none;padding:0;text-align:right;font-family:Calibri,Arial,sans-serif;font-size:10pt;color:#555;font-style:italic;">${docType ? docType.innerHTML : ''}</td>
+    </tr>`;
+    logoRow.replaceWith(tbl);
+  }
+
+  // Strip contenteditable (Word allows editing natively)
+  clone.querySelectorAll('[contenteditable]').forEach(el => el.removeAttribute('contenteditable'));
+
+  // Apply inline styles to tables so Word renders borders correctly
+  clone.querySelectorAll('table').forEach(tbl => {
+    if (!tbl.style.borderCollapse) tbl.style.borderCollapse = 'collapse';
+    if (!tbl.getAttribute('width')) tbl.setAttribute('width', '100%');
+  });
+  clone.querySelectorAll('th').forEach(th => {
+    th.style.cssText += ';background-color:#003366;color:#ffffff;padding:7pt 10pt;font-weight:600;border:1pt solid #002244;';
+  });
+  clone.querySelectorAll('td').forEach(td => {
+    if (!td.style.padding) td.style.padding = '6pt 10pt';
+    if (!td.style.border) td.style.borderColor = '#c8d4e8';
+  });
+
+  // Strip dashed borders and backgrounds from editable fields
+  clone.querySelectorAll('.editable-field').forEach(el => {
+    el.style.border = 'none';
+    el.style.background = 'transparent';
+    el.style.padding = '0';
+    el.style.marginBottom = '10pt';
+    el.style.fontFamily = 'Calibri, Arial, sans-serif';
+    el.style.fontSize = '11pt';
+    el.style.lineHeight = '1.6';
+    el.style.whiteSpace = 'pre-wrap';
+  });
+  clone.querySelectorAll('.inline-editable').forEach(el => {
+    el.style.borderBottom = 'none';
+    el.style.color = 'inherit';
+    el.style.fontWeight = 'inherit';
+  });
+
+  const wordCss = `
+    @page { margin: 2.5cm; }
+    body { font-family: Calibri, Arial, sans-serif; font-size: 11pt; color: #1a1a1a; line-height: 1.6; margin: 0; padding: 0; }
+    h2 { font-size: 13pt; font-weight: 700; color: #003366; border-bottom: 2pt solid #003366; padding-bottom: 4pt; margin: 18pt 0 10pt; }
+    h3 { font-size: 11pt; font-weight: 700; color: #1a3a6b; margin: 14pt 0 8pt; }
+    p { margin: 0 0 8pt; }
+    table { border-collapse: collapse; width: 100%; }
+    th { background-color: #003366; color: #ffffff; padding: 7pt 10pt; font-weight: 600; border: 1pt solid #002244; text-align: left; font-size: 9.5pt; }
+    td { padding: 6pt 10pt; border: 1pt solid #c8d4e8; vertical-align: top; font-size: 9.5pt; color: #1a1a1a; }
+    tr:nth-child(even) td { background-color: #f5f8ff; }
+    .report-meta-block { border: 2pt solid #003366; border-radius: 4pt; padding: 14pt 18pt; margin-bottom: 22pt; background-color: #f0f4fa; }
+    .meta-kv-table td:first-child { font-weight: 700; background-color: #e0eaf8; width: 30%; color: #003366; }
+    .meta-kv-table td { border: 1pt solid #c8d4e8; padding: 4pt 10pt; }
+    .report-section { margin-bottom: 22pt; }
+    .report-subsection { margin-bottom: 18pt; padding-left: 10pt; border-left: 3pt solid #4a90d9; }
+    .section-title { font-size: 13pt; font-weight: 700; color: #003366; border-bottom: 2pt solid #003366; padding-bottom: 4pt; margin-bottom: 12pt; }
+    .sec-num { background-color: #003366; color: #ffffff; border-radius: 3pt; padding: 1pt 7pt; font-size: 11pt; }
+    .subsection-title { font-size: 11pt; font-weight: 700; color: #1a3a6b; margin: 0 0 8pt; }
+    .field-key { font-weight: 600; color: #1a3a6b; background-color: #eaf0fb !important; width: 22%; }
+    .table-label { font-size: 9.5pt; font-weight: 700; color: #444; font-style: italic; margin: 14pt 0 4pt; }
+    .empty-row { text-align: center; color: #999; font-style: italic; }
+    .add-ioc-btn { display: none !important; }
+    .img-delete-btn { display: none !important; }
+    .evidencias-img-zone { border: none !important; background: transparent !important; padding: 0 !important; }
+    img[data-report-img] { max-width: 100%; height: auto; display: block; margin: 8pt 0; border: 1pt solid #c8d4e8; }
+    .report-img-wrapper { display: block; margin: 10pt 0; max-width: 100%; }
+  `;
+
+  const wordHtml = `<!DOCTYPE html>
+<html xmlns:o="urn:schemas-microsoft-com:office:office"
+      xmlns:w="urn:schemas-microsoft-com:office:word"
+      xmlns="http://www.w3.org/TR/REC-html40">
+<head>
+<meta charset="UTF-8">
+<meta name="ProgId" content="Word.Document">
+<meta name="Generator" content="Microsoft Word 15">
+<title>Reporte IQSEC</title>
+<!--[if gte mso 9]><xml>
+  <w:WordDocument>
+    <w:View>Print</w:View>
+    <w:Zoom>100</w:Zoom>
+    <w:DoNotOptimizeForBrowser/>
+  </w:WordDocument>
+</xml><![endif]-->
+<style>${wordCss}</style>
+</head>
+<body>
+${clone.innerHTML}
+</body>
+</html>`;
+
+  const blob = new Blob(['\ufeff', wordHtml], { type: 'application/msword' });
+  const url = URL.createObjectURL(blob);
+  const filename = `Reporte_IQSEC_${new Date().toISOString().slice(0,10)}.doc`;
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.style.display = 'none';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+  showToast('Reporte descargado como Word (.doc)', 'success');
 }
 
 // Settings Management
