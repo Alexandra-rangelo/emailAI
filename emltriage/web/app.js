@@ -504,8 +504,9 @@ function initializeEventListeners() {
       const container = document.getElementById('docx-preview-container');
       container.style.display = 'block';
       renderIQSECReport(container);
+      setupReportDeleteHandlers(container);
       setupImagePaste(container);
-      showToast('Vista previa generada. Puedes editar el texto directamente, y pegar capturas de pantalla con Ctrl+V / Cmd+V.', 'success');
+      showToast('Vista previa generada. Puedes editar el texto directamente, pegar capturas con Ctrl+V / Cmd+V, y eliminar secciones, filas o columnas con el botón × que aparece al pasar el cursor.', 'success');
     });
   }
 
@@ -2085,6 +2086,78 @@ function exportData(type) {
 // IQSEC Report Generator
 // ============================================================
 
+function makeDeleteBtn(titleText) {
+  const btn = document.createElement('button');
+  btn.className = 'delete-section-btn';
+  btn.title = titleText;
+  btn.textContent = '×';
+  return btn;
+}
+
+function setupReportDeleteHandlers(container) {
+  // --- Section titles (h2) → remove entire .report-section ---
+  container.querySelectorAll('h2.section-title').forEach(title => {
+    const btn = makeDeleteBtn('Eliminar sección');
+    btn.onclick = (e) => { e.stopPropagation(); title.closest('.report-section')?.remove(); };
+    title.appendChild(btn);
+  });
+
+  // --- Subsection titles (h3) → remove entire .report-subsection ---
+  container.querySelectorAll('h3.subsection-title').forEach(title => {
+    const btn = makeDeleteBtn('Eliminar subsección');
+    btn.onclick = (e) => { e.stopPropagation(); title.closest('.report-subsection')?.remove(); };
+    title.appendChild(btn);
+  });
+
+  // --- Tables: column delete (on each th) + row delete (ctrl-cell td) ---
+  container.querySelectorAll('table.report-table').forEach(table => {
+    const thead = table.querySelector('thead');
+    const tbody = table.querySelector('tbody');
+
+    if (thead) {
+      const headerRow = thead.querySelector('tr');
+      if (headerRow) {
+        // Delete-column button on each real th
+        const ths = Array.from(headerRow.querySelectorAll('th'));
+        ths.forEach((th, colIdx) => {
+          const btn = document.createElement('button');
+          btn.className = 'delete-col-btn';
+          btn.title = 'Eliminar columna';
+          btn.textContent = '×';
+          btn.onclick = (e) => {
+            e.stopPropagation();
+            table.querySelectorAll('tr').forEach(row => {
+              const cells = Array.from(row.querySelectorAll('th:not(.ctrl-cell), td:not(.ctrl-cell)'));
+              if (cells[colIdx]) cells[colIdx].remove();
+            });
+          };
+          th.appendChild(btn);
+        });
+
+        // Empty ctrl-cell header for the row-delete column
+        const ctrlTh = document.createElement('th');
+        ctrlTh.className = 'ctrl-cell';
+        headerRow.appendChild(ctrlTh);
+      }
+    }
+
+    // Delete-row button on each tbody tr
+    if (tbody) {
+      tbody.querySelectorAll('tr').forEach(tr => {
+        const ctrlTd = document.createElement('td');
+        ctrlTd.className = 'ctrl-cell';
+        const btn = document.createElement('button');
+        btn.className = 'delete-row-btn';
+        btn.title = 'Eliminar fila';
+        btn.textContent = '×';
+        btn.onclick = (e) => { e.stopPropagation(); tr.remove(); };
+        ctrlTd.appendChild(btn);
+        tr.appendChild(ctrlTd);
+      });
+    }
+  });
+}
+
 function renderIQSECReport(container) {
   const artifacts = state.data?.artifacts || {};
   const headers = artifacts.headers || [];
@@ -2502,6 +2575,12 @@ function exportIQSECHTML() {
   const filename = state.data?.artifacts?.metadata?.input_filename || 'reporte';
   const safeName = filename.replace(/[^a-z0-9]/gi, '_');
 
+  // Clone and strip interactive controls before export
+  const exportClone = preview.cloneNode(true);
+  exportClone.querySelectorAll('.ctrl-cell, .delete-section-btn, .delete-col-btn, .delete-row-btn, .add-ioc-btn, .img-delete-btn, .evidencias-hint').forEach(el => el.remove());
+  exportClone.querySelectorAll('[contenteditable]').forEach(el => el.removeAttribute('contenteditable'));
+  const exportHTML = exportClone.innerHTML;
+
   const html = `<!DOCTYPE html>
 <html lang="es">
 <head>
@@ -2525,7 +2604,7 @@ body { margin: 0; padding: 30px; font-family: Calibri, 'Segoe UI', Arial, sans-s
 .report-section { margin-bottom: 28px; }
 .section-title { font-size: 13pt; font-weight: 700; color: #003366; border-bottom: 2px solid #003366; padding-bottom: 4px; margin-bottom: 14px; display: flex; align-items: center; gap: 6px; }
 .sec-num { background: #003366; color: #fff; border-radius: 3px; padding: 1px 7px; font-size: 11pt; }
-.report-subsection { margin-bottom: 20px; padding-left: 8px; border-left: 3px solid #4a90d9; }
+.report-subsection { margin-bottom: 20px; }
 .subsection-title { font-size: 11pt; font-weight: 700; color: #1a3a6b; margin-bottom: 8px; }
 .editable-field { min-height: 60px; padding: 8px 10px; border: 1px dashed #aac; border-radius: 4px; background: #fafcff; white-space: pre-wrap; font-size: 10.5pt; line-height: 1.65; }
 .editable-field:empty::before { content: attr(placeholder); color: #aab; font-style: italic; pointer-events: none; }
@@ -2555,7 +2634,7 @@ body { margin: 0; padding: 30px; font-family: Calibri, 'Segoe UI', Arial, sans-s
 </style>
 </head>
 <body>
-${preview.innerHTML}
+${exportHTML}
 </body>
 </html>`;
 
@@ -2585,6 +2664,8 @@ function downloadIQSECWord() {
   // Remove buttons not needed in Word
   clone.querySelectorAll('.add-ioc-btn').forEach(el => el.remove());
   clone.querySelectorAll('.img-delete-btn').forEach(el => el.remove());
+  clone.querySelectorAll('.ctrl-cell').forEach(el => el.remove());
+  clone.querySelectorAll('.delete-section-btn, .delete-col-btn, .delete-row-btn').forEach(el => el.remove());
 
   // Remove drop-zone hint text (no longer needed in Word)
   clone.querySelectorAll('.evidencias-hint').forEach(el => el.remove());
@@ -2667,7 +2748,7 @@ function downloadIQSECWord() {
     .meta-kv-table td:first-child { font-weight: 700; background-color: #e0eaf8; width: 30%; color: #003366; }
     .meta-kv-table td { border: 1pt solid #c8d4e8; padding: 4pt 10pt; }
     .report-section { margin-bottom: 22pt; }
-    .report-subsection { margin-bottom: 18pt; padding-left: 10pt; border-left: 3pt solid #4a90d9; }
+    .report-subsection { margin-bottom: 18pt; }
     .section-title { font-size: 13pt; font-weight: 700; color: #003366; border-bottom: 2pt solid #003366; padding-bottom: 4pt; margin-bottom: 12pt; }
     .sec-num { background-color: #003366; color: #ffffff; border-radius: 3pt; padding: 1pt 7pt; font-size: 11pt; }
     .subsection-title { font-size: 11pt; font-weight: 700; color: #1a3a6b; margin: 0 0 8pt; }
@@ -2716,6 +2797,109 @@ ${clone.innerHTML}
   document.body.removeChild(a);
   setTimeout(() => URL.revokeObjectURL(url), 2000);
   showToast('Reporte descargado como Word (.doc)', 'success');
+}
+
+function downloadIQSECPDF() {
+  const container = document.getElementById('docx-preview-container');
+  if (!container || container.style.display === 'none') {
+    showToast('Primero genera la vista previa del reporte.', 'error');
+    return;
+  }
+
+  const clone = container.cloneNode(true);
+
+  // Remove interactive elements
+  clone.querySelectorAll('.add-ioc-btn').forEach(el => el.remove());
+  clone.querySelectorAll('.img-delete-btn').forEach(el => el.remove());
+  clone.querySelectorAll('.evidencias-hint').forEach(el => el.remove());
+  clone.querySelectorAll('.ctrl-cell').forEach(el => el.remove());
+  clone.querySelectorAll('.delete-section-btn, .delete-col-btn, .delete-row-btn').forEach(el => el.remove());
+  clone.querySelectorAll('[contenteditable]').forEach(el => el.removeAttribute('contenteditable'));
+
+  // Clean up evidencias zone
+  clone.querySelectorAll('.evidencias-img-zone').forEach(el => {
+    el.style.border = 'none';
+    el.style.background = 'transparent';
+    el.style.padding = '0';
+    el.style.minHeight = 'auto';
+  });
+
+  // Clean up editable fields
+  clone.querySelectorAll('.editable-field').forEach(el => {
+    el.style.border = 'none';
+    el.style.background = 'transparent';
+    el.style.padding = '0';
+  });
+  clone.querySelectorAll('.inline-editable').forEach(el => {
+    el.style.borderBottom = 'none';
+    el.style.color = 'inherit';
+    el.style.fontWeight = 'inherit';
+  });
+
+  const pdfCss = `
+    @page { margin: 2cm; size: A4; }
+    * { box-sizing: border-box; }
+    body { font-family: Calibri, Arial, sans-serif; font-size: 11pt; color: #1a1a1a; line-height: 1.6; margin: 0; padding: 0; }
+    h2 { font-size: 13pt; font-weight: 700; color: #003366; border-bottom: 2pt solid #003366; padding-bottom: 4pt; margin: 18pt 0 10pt; }
+    h3 { font-size: 11pt; font-weight: 700; color: #1a3a6b; margin: 14pt 0 8pt; }
+    p { margin: 0 0 8pt; }
+    table { border-collapse: collapse; width: 100%; table-layout: fixed; }
+    th { background-color: #003366; color: #ffffff; padding: 6pt 8pt; font-weight: 600; border: 1pt solid #002244; text-align: left; font-size: 9pt; word-wrap: break-word; }
+    td { padding: 5pt 8pt; border: 1pt solid #c8d4e8; vertical-align: top; font-size: 9pt; color: #1a1a1a; word-wrap: break-word; }
+    tr:nth-child(even) td { background-color: #f5f8ff; }
+    .report-meta-block { border: 2pt solid #003366; border-radius: 4pt; padding: 12pt 16pt; margin-bottom: 20pt; background-color: #f0f4fa; }
+    .meta-kv-table td:first-child { font-weight: 700; background-color: #e0eaf8; width: 30%; color: #003366; }
+    .meta-kv-table td { border: 1pt solid #c8d4e8; padding: 4pt 8pt; }
+    .report-section { margin-bottom: 20pt; }
+    .report-subsection { margin-bottom: 16pt; }
+    .section-title { font-size: 13pt; font-weight: 700; color: #003366; border-bottom: 2pt solid #003366; padding-bottom: 4pt; margin-bottom: 12pt; display: flex; align-items: center; gap: 6pt; }
+    .sec-num { background-color: #003366; color: #ffffff; border-radius: 3pt; padding: 1pt 7pt; font-size: 11pt; }
+    .subsection-title { font-size: 11pt; font-weight: 700; color: #1a3a6b; margin: 0 0 8pt; }
+    .field-key { font-weight: 600; color: #1a3a6b; background-color: #eaf0fb !important; width: 22%; }
+    .table-label { font-size: 9pt; font-weight: 700; color: #444; font-style: italic; margin: 12pt 0 4pt; }
+    .table-wrapper { overflow: visible; width: 100%; }
+    .empty-row { text-align: center; color: #999; font-style: italic; }
+    .report-logo-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16pt; }
+    .report-brand { font-size: 20pt; font-weight: 800; color: #003366; letter-spacing: 2px; }
+    .report-doc-type { font-size: 10pt; color: #555; font-style: italic; }
+    .editable-field { white-space: pre-wrap; }
+    .evidencias-img-zone { border: none !important; background: transparent !important; padding: 0 !important; }
+    img[data-report-img] { max-width: 100%; height: auto; display: block; margin: 8pt 0; border: 1pt solid #c8d4e8; }
+    .report-img-wrapper { display: block; margin: 10pt 0; max-width: 100%; }
+    .ioc-report-table th, .ioc-report-table td { font-size: 8pt; padding: 4pt 6pt; }
+    @media print {
+      body { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      .report-section { page-break-inside: avoid; }
+      table { page-break-inside: auto; }
+      tr { page-break-inside: avoid; }
+    }
+  `;
+
+  const safeName = new Date().toISOString().slice(0, 10);
+  const pdfHtml = `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Reporte IQSEC ${safeName}</title>
+<style>${pdfCss}</style>
+</head>
+<body>
+${clone.innerHTML}
+</body>
+</html>`;
+
+  const win = window.open('', '_blank', 'width=900,height=700');
+  if (!win) {
+    showToast('El navegador bloqueó la ventana emergente. Permite pop-ups para esta página.', 'error');
+    return;
+  }
+  win.document.write(pdfHtml);
+  win.document.close();
+  win.onload = () => {
+    win.focus();
+    win.print();
+  };
+  showToast('Se abrió el diálogo de impresión — selecciona "Guardar como PDF"', 'success');
 }
 
 // Settings Management
