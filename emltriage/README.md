@@ -1,325 +1,356 @@
 # emltriage
 
-**DFIR-grade email analysis tool with deterministic extraction and AI narrative**
+**Plataforma web de análisis forense de correo electrónico para equipos DFIR/SOC**
 
-emltriage is a powerful, evidence-first email analysis tool designed for Digital Forensics and Incident Response (DFIR) workflows. It provides deterministic extraction of email artifacts, structured output with cryptographic verification, and an AI-assisted narrative layer that strictly adheres to evidence discipline.
+emltriage es una herramienta de análisis de correo electrónico orientada a Digital Forensics and Incident Response (DFIR). Combina una interfaz web interactiva con un backend FastAPI para extraer artefactos, enriquecer indicadores de compromiso (IOCs) con inteligencia de amenazas, consultar IA y generar reportes forenses editables y descargables en múltiples formatos.
 
-## 🚀 Quick Start (3 Options)
+---
 
-### Option 1: One-Line Install (Recommended)
+## Características principales
+
+- **Análisis determinístico** de archivos `.eml` y `.msg`: cabeceras, cuerpo, adjuntos, URLs, IOCs, autenticación SPF/DKIM/DMARC y trayectoria de enrutamiento.
+- **Enriquecimiento CTI**: DNS/WHOIS automático, VirusTotal (con API key) y URLhaus (sin API key).
+- **Análisis IA**: soporte para Ollama (local), OpenAI, Anthropic, DeepSeek, Groq y cualquier endpoint compatible con OpenAI.
+- **Generador de Reportes IQSEC**: previsualización editable en pantalla con exportación a HTML, Word (.doc) y PDF.
+- **Interfaz web completa** sin necesidad de usar la línea de comandos para el flujo principal.
+
+---
+
+## Requisitos
+
+- Python 3.11 o superior
+- `pip` y `venv`
+- `dig` (para resolución DNS en CTI) — incluido en macOS/Linux por defecto
+
+### Opcionales (según funcionalidades deseadas)
+
+| Funcionalidad | Requisito |
+|---|---|
+| IA local | [Ollama](https://ollama.com) instalado y corriendo |
+| IA en la nube | API key de OpenAI, Anthropic, DeepSeek o Groq |
+| Reputación avanzada | API key de VirusTotal |
+
+---
+
+## Instalación
+
+### 1. Clonar el repositorio
+
 ```bash
-curl -fsSL https://raw.githubusercontent.com/dfir/emltriage/main/install.sh | bash
+git clone https://github.com/Player0xA/AIEML.git
+cd AIEML/emltriage
 ```
 
-### Option 2: Manual Install with Makefile
+### 2. Crear entorno virtual e instalar dependencias
+
 ```bash
-git clone https://github.com/dfir/emltriage.git
-cd emltriage
-make install        # Basic offline installation
-# OR
-make install-ai     # With AI support (Ollama/OpenAI/Anthropic)
-# OR
-make install-dev    # Full development environment
-
-# Start using
-source venv/bin/activate
-emltriage analyze suspicious.eml -o ./output
-```
-
-### Option 3: Docker (Zero Dependencies)
-```bash
-# Clone repo
-git clone https://github.com/dfir/emltriage.git
-cd emltriage
-
-# Build and run with Ollama included
-make docker-build
-make docker-run
-
-# Or manually
-docker-compose up -d
-```
-
-## 📦 Installation Options
-
-### Requirements
-- Python 3.11+ (check: `python3 --version`)
-- Git (for cloning)
-
-### Method 1: Easy Install Script (Interactive)
-```bash
-# Download and run installer
-curl -fsSL https://raw.githubusercontent.com/dfir/emltriage/main/install.sh | bash
-
-# The installer will:
-# 1. Check Python version
-# 2. Create virtual environment
-# 3. Install base dependencies
-# 4. Optionally install AI support
-# 5. Set up environment
-```
-
-### Method 2: pip + requirements.txt
-```bash
-git clone https://github.com/dfir/emltriage.git
-cd emltriage
-
-# Create virtual environment
+# Crear y activar entorno virtual
 python3 -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+source venv/bin/activate        # macOS / Linux
+# venv\Scripts\activate         # Windows
 
-# Install base dependencies
+# Instalar dependencias base
 pip install -r requirements.txt
-
-# Install with AI support (optional)
-pip install -r requirements-ai.txt
-
-# Install emltriage
 pip install -e .
+
+# Instalar dependencias del servidor web
+pip install fastapi uvicorn[standard]
 ```
 
-### Method 3: Docker (Isolated Environment)
+### 3. (Opcional) Instalar soporte de IA en la nube
+
 ```bash
-# Build image
-docker build -t emltriage:latest .
-
-# Run single analysis
-docker run -v $(pwd)/data:/data emltriage:latest \
-  analyze /data/suspicious.eml -o /data/output
-
-# Or use docker-compose for full stack (includes Ollama)
-docker-compose up -d
+pip install -r requirements-ai.txt
 ```
 
-## 🔧 Post-Installation Setup
+### Alternativa con Makefile
 
-### 1. Configure Environment (Optional)
 ```bash
-# Copy example environment file
+make install        # Instalación base
+make install-ai     # Con soporte de IA (OpenAI, Anthropic, Ollama)
+make install-dev    # Con dependencias de desarrollo y pruebas
+```
+
+---
+
+## Levantar el servidor
+
+```bash
+# Con el entorno virtual activado:
+source venv/bin/activate
+
+# Opción A — directamente con uvicorn
+uvicorn web.server:app --host 0.0.0.0 --port 8080 --reload
+
+# Opción B — ejecutando el módulo directamente
+python web/server.py
+```
+
+Luego abre en el navegador: **http://localhost:8080**
+
+> El flag `--reload` recarga automáticamente el servidor al guardar cambios en el código (útil durante desarrollo).
+
+---
+
+## Uso de la interfaz web
+
+### Panel: Análisis de Correo
+
+1. Arrastra o selecciona un archivo `.eml` o `.msg`.
+2. (Opcional) ingresa una API key de VirusTotal para enriquecimiento avanzado.
+3. Haz clic en **Analizar** — el backend procesa el correo y devuelve los artefactos.
+
+### Panel: Inteligencia de Amenazas (CTI)
+
+- Se ejecuta automáticamente tras el análisis.
+- Realiza consultas DNS y WHOIS en paralelo para todos los dominios encontrados.
+- Si se proporcionó una API key de VirusTotal, consulta reputación de dominios, IPs y URLs.
+- Consulta URLhaus sin necesidad de API key.
+
+### Panel: Resumen IA
+
+- Configura el endpoint de tu LLM preferido (Ollama local, OpenAI, DeepSeek, Groq, etc.).
+- Selecciona el modelo y la longitud del análisis (rápido, medio, completo).
+- Genera un análisis narrativo del correo basado en los artefactos extraídos.
+
+### Panel: Generador de Reportes (Report Builder)
+
+1. **Generar Reporte**: genera una vista previa editable con los datos del análisis en formato de reporte forense IQSEC.
+2. **Edición en pantalla**: todos los campos de texto son editables directamente. Se pueden:
+   - Editar texto de cualquier campo libre.
+   - Eliminar secciones completas (ícono `×` al hacer hover sobre el título `h2`).
+   - Eliminar subsecciones completas (ícono `×` al hacer hover sobre el subtítulo `h3`).
+   - Eliminar filas de cualquier tabla (ícono `×` al final de cada fila al hacer hover).
+   - Eliminar columnas de cualquier tabla (ícono `×` en la esquina del encabezado al hacer hover).
+   - Pegar capturas de pantalla con `Ctrl+V` / `Cmd+V` en la sección de evidencias.
+3. **Exportar**:
+   - **Descargar HTML**: descarga el reporte como archivo HTML autocontenido.
+   - **Descargar Word**: descarga en formato `.doc` compatible con Microsoft Word.
+   - **Descargar PDF**: abre el diálogo de impresión del navegador para guardar como PDF.
+
+---
+
+## Configuración de API keys
+
+Copia el archivo de ejemplo y edítalo:
+
+```bash
 cp .env.example .env
-
-# Edit .env to add API keys if needed:
-# - OpenAI API key (for GPT-4)
-# - Anthropic API key (for Claude)
-# - VirusTotal API key (for threat intel)
-# - AbuseIPDB API key (for IP reputation)
 ```
 
-### 2. Set Up Ollama (for Local AI - Default)
+Contenido del `.env`:
+
+```env
+# IA local (Ollama — sin API key)
+OLLAMA_BASE_URL=http://localhost:11434
+
+# IA en la nube (opcional)
+OPENAI_API_KEY=sk-tu-clave-aqui
+ANTHROPIC_API_KEY=sk-ant-tu-clave-aqui
+
+# Inteligencia de amenazas (opcional)
+VIRUSTOTAL_API_KEY=tu-clave-vt-aqui
+ABUSEIPDB_API_KEY=tu-clave-abuseipdb-aqui
+
+# Proveedor IA por defecto
+EMLTRIAGE_AI_PROVIDER=ollama
+```
+
+> La herramienta funciona **100% offline** sin ninguna API key. Las claves solo se necesitan para funcionalidades en la nube.
+
+---
+
+## Configurar Ollama (IA local)
+
 ```bash
-# Install Ollama from https://ollama.com
-# On macOS/Linux:
+# Instalar Ollama (macOS/Linux)
 curl -fsSL https://ollama.com/install.sh | sh
 
-# Pull a model (e.g., llama3.1)
+# Descargar un modelo (ej. llama3.1)
 ollama pull llama3.1
 
-# Start Ollama server
+# Iniciar el servidor Ollama
 ollama serve
 ```
 
-### 3. Create Watchlists (Optional)
+En la interfaz web, configura el endpoint como `http://localhost:11434` y el modelo como `llama3.1`.
+
+---
+
+## Uso por línea de comandos (CLI)
+
+El CLI está disponible para flujos automatizados o integración con otras herramientas:
+
 ```bash
-mkdir -p watchlists
-
-# Create sample watchlist
-cat > watchlists/my_watchlist.csv << EOF
-ioc,ioc_type,list_type,description,tags,confidence
-evil-domain.com,domain,blocklist,Known malicious domain,malware,1.0
-suspicious-ip,ipv4,blocklist,Suspicious IP,malicious,0.9
-EOF
-```
-
-## 🎯 Usage Examples
-
-### Basic Analysis (Offline)
-```bash
-# Single email
+# Análisis básico
 emltriage analyze email.eml -o ./output
 
-# Deep analysis with macro detection
+# Análisis profundo (detección de macros)
 emltriage analyze suspicious.eml -o ./output --mode deep
 
-# Batch process directory
-emltriage batch ./emails/ -o ./results --jsonl
+# Procesamiento en lote
+emltriage batch ./emails/ -o ./results
+
+# Enriquecimiento CTI
+emltriage cti ./output/iocs.json -o ./output --watchlist ./watchlists/ --online
+
+# Análisis IA (requiere Ollama corriendo)
+emltriage ai ./output/artifacts.json -o ./output --cti ./output/cti.json
 ```
 
-### With CTI Enrichment
-```bash
-# Requires local watchlists or API keys
-emltriage analyze email.eml -o ./output
-emltriage cti ./output/iocs.json -o ./output \
-  --watchlist ./watchlists/ \
-  --online  # Enable online providers
-```
-
-### With AI Analysis (Default: Ollama Local)
-```bash
-# Ensure Ollama is running: ollama serve
-
-# Full pipeline
-emltriage analyze email.eml -o ./output
-emltriage cti ./output/iocs.json -o ./output -w ./watchlists/
-emltriage ai ./output/artifacts.json -o ./output \
-  --cti ./output/cti.json \
-  --auth ./output/auth_results.json
-```
-
-### With Cloud AI (OpenAI/Anthropic)
-```bash
-# Set API key
-export OPENAI_API_KEY="sk-..."
-# OR
-export ANTHROPIC_API_KEY="sk-ant-..."
-
-# Use cloud provider
-emltriage ai ./output/artifacts.json -o ./output \
-  --provider openai \
-  --model gpt-4
-```
-
-## 📁 Output Structure
+### Estructura de salida del CLI
 
 ```
 output/
-├── artifacts.json          # Complete extraction artifacts
-├── iocs.json              # Normalized IOCs
-├── auth_results.json      # Authentication analysis
-├── report.md              # Deterministic report (Phase 1)
-├── manifest.json          # File hashes and metadata
-├── cti.json              # CTI enrichment (Phase 2)
-├── ai_report.json        # AI analysis (Phase 3)
-├── ai_report.md          # AI narrative report
-├── attachments/          # Carved attachments
-│   ├── <id>_document.pdf
-│   └── <id>_image.png
-├── body_1.txt           # Decoded text body
-└── body_2.html          # Decoded HTML body
+├── artifacts.json          # Artefactos completos extraídos
+├── iocs.json               # IOCs normalizados y filtrados
+├── auth_results.json       # Resultados SPF/DKIM/DMARC
+├── report.md               # Reporte determinístico en Markdown
+├── manifest.json           # Hashes SHA256 de archivos
+├── cti.json                # Enriquecimiento CTI (fase 2)
+├── ai_report.json          # Análisis IA estructurado (fase 3)
+├── ai_report.md            # Narrativa IA en Markdown
+├── attachments/            # Adjuntos extraídos
+│   ├── <id>_documento.pdf
+│   └── <id>_imagen.png
+├── body_1.txt              # Cuerpo en texto plano
+└── body_2.html             # Cuerpo HTML decodificado
 ```
 
-## 🛠️ Development
+---
+
+## Arquitectura del proyecto
+
+```
+emltriage/
+├── web/
+│   ├── server.py           # Backend FastAPI (API REST + archivos estáticos)
+│   ├── index.html          # Interfaz web principal
+│   ├── app.js              # Lógica frontend completa
+│   ├── styles.css          # Estilos generales de la UI
+│   └── report-preview.css  # Estilos del generador de reportes
+├── emltriage/
+│   ├── cli.py              # CLI con Typer (5 comandos)
+│   ├── core/               # Fase 1: Extracción determinística
+│   │   ├── parser.py       # Orquestador principal
+│   │   ├── models.py       # Esquemas Pydantic (30+)
+│   │   ├── ioc_filter.py   # Filtrado de ruido de infraestructura
+│   │   └── extract/        # Módulos de extracción
+│   ├── cti/                # Fase 2: Enriquecimiento CTI
+│   │   ├── engine.py       # Orquestador CTI
+│   │   ├── cache.py        # Caché SQLite con TTL
+│   │   └── providers/      # VirusTotal, AbuseIPDB, URLhaus, watchlists
+│   ├── ai/                 # Fase 3: Narrativa IA
+│   │   ├── engine.py       # Orquestador IA
+│   │   ├── validators.py   # Disciplina de evidencia / anti-alucinación
+│   │   └── providers/      # Ollama, OpenAI, Anthropic
+│   ├── reporting/          # Generación de reportes
+│   │   ├── docx/           # Renderer Word
+│   │   └── json_generator.py
+│   └── infra/
+│       └── robust_whois.py # WHOIS con fallback a RDAP
+├── requirements.txt        # Dependencias base
+├── requirements-ai.txt     # Dependencias IA en la nube
+├── pyproject.toml          # Configuración del paquete
+├── Makefile                # Comandos de instalación y desarrollo
+└── .env.example            # Plantilla de variables de entorno
+```
+
+---
+
+## API REST del backend
+
+El servidor expone los siguientes endpoints:
+
+| Método | Endpoint | Descripción |
+|---|---|---|
+| `POST` | `/api/analyze` | Analiza un archivo `.eml` o `.msg` |
+| `POST` | `/api/cti/fast` | DNS + WHOIS en paralelo para dominios |
+| `POST` | `/api/cti/vt` | Reputación VirusTotal |
+| `POST` | `/api/cti/urlhaus` | Reputación URLhaus (sin API key) |
+| `POST` | `/api/ai/summarize` | Genera resumen IA vía endpoint configurable |
+| `GET`  | `/api/ai/status` | Estado del proveedor IA (Ollama) |
+| `POST` | `/api/export/docx` | Exporta reporte como `.docx` |
+| `POST` | `/api/report/generate` | Genera reporte JSON con narrativa IA |
+
+---
+
+## Desarrollo
 
 ```bash
-# Install development dependencies
+# Instalar dependencias de desarrollo
 make install-dev
 
-# Run tests
+# Ejecutar pruebas
 make test
 
-# Run linter
+# Linter
 make lint
 
-# Format code
+# Formatear código
 make format
 
-# Type checking
+# Verificación de tipos
 make typecheck
 
-# Clean build artifacts
+# Limpiar artefactos de build
 make clean
 ```
 
-## 🌐 API Keys (Optional)
+---
 
-The tool works 100% offline. Only configure these if you want cloud features:
+## Solución de problemas
 
-| Provider | Environment Variable | Get Key From |
-|----------|---------------------|--------------|
-| OpenAI | `OPENAI_API_KEY` | https://platform.openai.com |
-| Anthropic | `ANTHROPIC_API_KEY` | https://console.anthropic.com |
-| VirusTotal | `VIRUSTOTAL_API_KEY` | https://www.virustotal.com |
-| AbuseIPDB | `ABUSEIPDB_API_KEY` | https://www.abuseipdb.com |
+### El servidor no inicia
 
-## 🐛 Troubleshooting
-
-### Python Version Error
 ```bash
-# Check Python version
-python3 --version  # Must be 3.11+
+# Verificar que el entorno virtual esté activado
+source venv/bin/activate
 
-# If older, install newer Python or use pyenv
+# Verificar que fastapi y uvicorn estén instalados
+pip install fastapi uvicorn[standard]
+
+# Verificar que el puerto 8080 esté libre
+lsof -i :8080
+```
+
+### Error de versión de Python
+
+```bash
+python3 --version   # Debe ser 3.11 o superior
+
+# Si es más antigua, usar pyenv:
 pyenv install 3.11
 pyenv local 3.11
 ```
 
-### Ollama Not Found
+### Ollama no disponible
+
 ```bash
-# Check if Ollama is running
+# Verificar que Ollama esté corriendo
 curl http://localhost:11434/api/tags
 
-# If not running, start it
+# Iniciar si no está activo
 ollama serve
 
-# Pull a model
+# Descargar modelo si es necesario
 ollama pull llama3.1
 ```
 
-### Permission Errors
-```bash
-# Make install script executable
-chmod +x install.sh
-
-# Run with bash explicitly
-bash install.sh
-```
-
-### Docker Issues
-```bash
-# Rebuild without cache
-docker-compose down
-docker-compose build --no-cache
-docker-compose up -d
-
-# Check logs
-docker-compose logs -f emltriage
-```
-
-## 📚 Documentation
-
-- [Installation Guide](./docs/installation.md) - Detailed installation options
-- [Usage Guide](./docs/usage.md) - Complete command reference
-- [Architecture](./docs/architecture.md) - Technical documentation
-- [Phase 1 Completion](./docs/phase1_completion.md) - Core extraction
-- [Phase 2 Completion](./docs/phase2_completion.md) - CTI enrichment
-- [Phase 3 Completion](./docs/phase3_completion.md) - AI narrative
-- [Complete Implementation](./docs/COMPLETE_IMPLEMENTATION.md) - Full summary
-
-## 🤝 Contributing
+### Error al analizar archivos .msg (Outlook)
 
 ```bash
-# Fork and clone
-git clone https://github.com/YOUR_USERNAME/emltriage.git
-cd emltriage
-
-# Set up dev environment
-make install-dev
-
-# Create branch
-git checkout -b feature/my-feature
-
-# Make changes and test
-make test
-make lint
-
-# Commit and push
-git add .
-git commit -m "Add feature: ..."
-git push origin feature/my-feature
-
-# Create Pull Request
+# Asegurar que extract-msg esté instalado
+pip install extract-msg>=0.55.0
 ```
-
-## 📄 License
-
-MIT License - See [LICENSE](./LICENSE) file
-
-## 🙏 Acknowledgments
-
-- Built with [Pydantic](https://pydantic.dev/) for schema validation
-- CLI powered by [Typer](https://typer.tiangolo.com/)
-- Rich output via [Rich](https://rich.readthedocs.io/)
-- Local AI via [Ollama](https://ollama.com)
 
 ---
 
-**Ready to analyze suspicious emails?** Run `make install` and start with `emltriage analyze email.eml -o ./output`
+## Licencia
+
+MIT License — ver archivo [LICENSE](./LICENSE)
+
+---
+
+**¿Listo para analizar correos sospechosos?**
+Instala, levanta el servidor con `uvicorn web.server:app --port 8080` y abre `http://localhost:8080` en tu navegador.
